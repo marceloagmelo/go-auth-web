@@ -1,0 +1,28 @@
+{{define "Erro"}}
+
+<!DOCTYPE html>
+<html lang="">
+
+{{template "_head"}}
+
+<body>
+
+<div class="container">
+    <div class="jumbotron" style="margin-top: 200px;">
+        <div class="container">
+            <h1 class="text-center">{{.titulo}}</h1>
+        </div>
+        <div class="alert alert-danger" id="alerta-error">
+            <strong>{{.mensagemErro}}</strong>
+        </div>            
+        <div class="container">
+            <a class="btn btn-info" href="/">Voltar</a>
+        </div>
+    </div>
+</div>
+
+</body>
+
+</html>
+
+{{end}}
