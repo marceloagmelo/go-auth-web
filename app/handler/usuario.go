@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"html/template"
 	"net/http"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/securecookie"
@@ -17,6 +19,11 @@ var view = template.Must(template.ParseGlob("views/*.html"))
 var cookieHandler = securecookie.New(
 	securecookie.GenerateRandomKey(64),
 	securecookie.GenerateRandomKey(32))
+
+const (
+	cookieNomeUsuario  = "nomeUsuario"
+	cookieSenhaUsuario = "senhaUsuario"
+)
 
 //Health testa conexão com o mysql e rabbitmq
 func Health(w http.ResponseWriter, r *http.Request) {
@@ -60,7 +67,7 @@ func Health(w http.ResponseWriter, r *http.Request) {
 
 //Index primeira página
 func Index(w http.ResponseWriter, r *http.Request) {
-	nomeUsuario := getUserName(r)
+	nomeUsuario, _ := getDadosCookie(r)
 	if !utils.IsEmpty(nomeUsuario) {
 		http.Redirect(w, r, "/listar", 302)
 	} else {
@@ -75,10 +82,10 @@ func Index(w http.ResponseWriter, r *http.Request) {
 
 //Listar usuários
 func Listar(w http.ResponseWriter, r *http.Request) {
-	nomeUsuario := getUserName(r)
+	nomeUsuario, senhaUsuario := getDadosCookie(r)
 
 	if !utils.IsEmpty(nomeUsuario) {
-		usuarios, _ := api.ListaUsuarios()
+		usuarios, _ := api.ListaUsuarios(nomeUsuario, senhaUsuario)
 
 		data := map[string]interface{}{
 			"titulo":      "Lista de Usuários",
@@ -109,45 +116,20 @@ func Listar(w http.ResponseWriter, r *http.Request) {
 
 //Adicionar usuário
 func Adicionar(w http.ResponseWriter, r *http.Request) {
-	if r.Method == "POST" {
+	nomeUsuario, senhaUsuario := getDadosCookie(r)
 
-		err := r.ParseForm()
-		if err != nil {
-			mensagemErro := fmt.Sprintf("%s: %s", "Erro no parse do formulário", err)
-			data := map[string]interface{}{
-				"titulo":       "Lista de Usuários",
-				"mensagemErro": mensagemErro,
-			}
+	if !utils.IsEmpty(nomeUsuario) {
+		if r.Method == "POST" {
 
-			err := view.ExecuteTemplate(w, "Erro", data)
+			err := r.ParseForm()
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			return
-		}
-
-		usuario := r.FormValue("usuario")
-		senha := r.FormValue("senha")
-		email := r.FormValue("email")
-
-		if usuario != "" && senha != "" && email != "" {
-			var usuarioForm models.Usuario
-			usuarioForm.ID = 0
-			usuarioForm.Login = usuario
-			usuarioForm.Senha = senha
-			usuarioForm.Email = email
-			usuarioForm.Status = 1
-
-			usuarioRetorno, err := api.AdicionarUsuario(usuarioForm)
-			if err != nil {
-				mensagemErro := fmt.Sprintf("%s: %s", "Erro ao adicionar o usuário", err)
+				mensagemErro := fmt.Sprintf("%s: %s", "Erro no parse do formulário", err)
 				data := map[string]interface{}{
 					"titulo":       "Lista de Usuários",
 					"mensagemErro": mensagemErro,
 				}
 
-				err = view.ExecuteTemplate(w, "Erro", data)
+				err := view.ExecuteTemplate(w, "Erro", data)
 				if err != nil {
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 					return
@@ -155,26 +137,58 @@ func Adicionar(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			if usuarioRetorno.ID == 0 {
-				mensagemErro := fmt.Sprintf("%s", "Erro ao adicionar o usuário, favor veja o log da api.")
-				data := map[string]interface{}{
-					"titulo":       "Lista de Usuários",
-					"mensagemErro": mensagemErro,
-				}
+			usuario := r.FormValue("usuario")
+			senha := r.FormValue("senha")
+			email := r.FormValue("email")
 
-				err = view.ExecuteTemplate(w, "Erro", data)
+			if usuario != "" && senha != "" && email != "" {
+				var usuarioForm models.Usuario
+				usuarioForm.ID = 0
+				usuarioForm.Login = usuario
+				usuarioForm.Senha = senha
+				usuarioForm.Email = email
+				usuarioForm.Status = 1
+
+				usuarioRetorno, err := api.AdicionarUsuario(nomeUsuario, senhaUsuario, usuarioForm)
 				if err != nil {
-					http.Error(w, err.Error(), http.StatusInternalServerError)
+					mensagemErro := fmt.Sprintf("%s: %s", "Erro ao adicionar o usuário", err)
+					data := map[string]interface{}{
+						"titulo":       "Lista de Usuários",
+						"mensagemErro": mensagemErro,
+					}
+
+					err = view.ExecuteTemplate(w, "Erro", data)
+					if err != nil {
+						http.Error(w, err.Error(), http.StatusInternalServerError)
+						return
+					}
 					return
 				}
-				return
+
+				if usuarioRetorno.ID == 0 {
+					mensagemErro := fmt.Sprintf("%s", "Erro ao adicionar o usuário, favor veja o log da api.")
+					logger.Erro.Println(mensagemErro)
+					data := map[string]interface{}{
+						"titulo":       "Lista de Usuários",
+						"mensagemErro": mensagemErro,
+					}
+
+					err = view.ExecuteTemplate(w, "Erro", data)
+					if err != nil {
+						http.Error(w, err.Error(), http.StatusInternalServerError)
+						return
+					}
+					return
+				}
+
+				mensagem := fmt.Sprintf("Usuário %v adicionado com sucesso!", usuarioRetorno.Login)
+				logger.Info.Println(mensagem)
+
+				http.Redirect(w, r, "/", 301)
 			}
-
-			mensagem := fmt.Sprintf("Usuário %v adicionar com sucesso!", usuarioRetorno.ID)
-			logger.Info.Println(mensagem)
-
-			http.Redirect(w, r, "/", 301)
 		}
+	} else {
+		avisoUsuarioNaoLogado(w)
 	}
 }
 
@@ -204,7 +218,9 @@ func Logar(w http.ResponseWriter, r *http.Request) {
 		if usuario != "" && senha != "" {
 			var usuarioForm models.Usuario
 			usuarioForm.Login = usuario
-			usuarioForm.Senha = senha
+			senhaSum := sha256.Sum256([]byte(senha))
+			senhaHash := fmt.Sprintf("%X", senhaSum)
+			usuarioForm.Senha = string(senhaHash)
 
 			usuarioRetorno, err := api.Logar(usuarioForm)
 			if err != nil {
@@ -240,7 +256,8 @@ func Logar(w http.ResponseWriter, r *http.Request) {
 			mensagem := fmt.Sprintf("Usuário %v logado com sucesso!", usuarioRetorno.Login)
 			logger.Info.Println(mensagem)
 
-			setCookie(usuarioRetorno.Login, w)
+			setCookie(usuarioRetorno.Login, usuarioRetorno.Senha, w)
+
 			http.Redirect(w, r, "/", 301)
 		}
 	}
@@ -248,43 +265,52 @@ func Logar(w http.ResponseWriter, r *http.Request) {
 
 //Logout do usuário
 func Logout(w http.ResponseWriter, r *http.Request) {
-	nomeUsuario := getUserName(r)
+	nomeUsuario, _ := getDadosCookie(r)
 
 	mensagem := fmt.Sprintf("Usuário %v deslogado com sucesso!", nomeUsuario)
 	logger.Info.Println(mensagem)
 
-	clearCookie(w)
+	clearCookie(cookieNomeUsuario, w)
+	clearCookie(cookieSenhaUsuario, w)
+
 	http.Redirect(w, r, "/", 302)
 }
 
 //Apagar usuário
 func Apagar(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	id := vars["id"]
-	err := api.ApagarUsuario(id)
-	if err != nil {
-		mensagemErro := fmt.Sprintf("%s: %s", "Erro no parse do formulário", err)
-		data := map[string]interface{}{
-			"titulo":       "Lista de Usuários",
-			"mensagemErro": mensagemErro,
-		}
+	nomeUsuario, senhaUsuario := getDadosCookie(r)
 
-		err := view.ExecuteTemplate(w, "Erro", data)
+	if !utils.IsEmpty(nomeUsuario) {
+		vars := mux.Vars(r)
+		id := vars["id"]
+		err := api.ApagarUsuario(nomeUsuario, senhaUsuario, id)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			mensagemErro := fmt.Sprintf("%s: %s", "Erro no parse do formulário", err)
+			data := map[string]interface{}{
+				"titulo":       "Lista de Usuários",
+				"mensagemErro": mensagemErro,
+			}
+
+			err := view.ExecuteTemplate(w, "Erro", data)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
 			return
 		}
-		return
-	}
-	mensagem := fmt.Sprintf("Usuário %v apagado com sucesso!", id)
-	logger.Info.Println(mensagem)
+		mensagem := fmt.Sprintf("Usuário %v apagado com sucesso!", nomeUsuario)
+		logger.Info.Println(mensagem)
 
-	http.Redirect(w, r, "/", http.StatusAccepted)
+		http.Redirect(w, r, "/", http.StatusAccepted)
+	} else {
+		avisoUsuarioNaoLogado(w)
+	}
+
 }
 
 //New página de edição de um novo usuário
 func New(w http.ResponseWriter, r *http.Request) {
-	nomeUsuario := getUserName(r)
+	nomeUsuario, _ := getDadosCookie(r)
 
 	if !utils.IsEmpty(nomeUsuario) {
 		data := map[string]interface{}{
@@ -299,24 +325,38 @@ func New(w http.ResponseWriter, r *http.Request) {
 }
 
 //setCookie  setar o cookie
-func setCookie(userName string, response http.ResponseWriter) {
-	value := map[string]string{
-		"usuario": userName,
+func setCookie(usuario, senha string, response http.ResponseWriter) {
+	/*value := map[string]string{
+		chave: valor,
 	}
 	if encoded, err := cookieHandler.Encode("cookie", value); err == nil {
 		cookie := &http.Cookie{
-			Name:  "cookie",
+			Name:  chave,
 			Value: encoded,
 			Path:  "/",
 		}
 		http.SetCookie(response, cookie)
+	}*/
+
+	usuarioCookie := http.Cookie{
+		Name:    cookieNomeUsuario,
+		Value:   usuario,
+		Expires: time.Now().Add(time.Duration(1) * time.Hour),
 	}
+	http.SetCookie(response, &usuarioCookie)
+
+	senhaCookie := http.Cookie{
+		Name:    cookieSenhaUsuario,
+		Value:   senha,
+		Expires: time.Now().Add(time.Duration(1) * time.Hour),
+	}
+	http.SetCookie(response, &senhaCookie)
 }
 
 //clearCookie  limpar o cookie
-func clearCookie(response http.ResponseWriter) {
+func clearCookie(chave string, response http.ResponseWriter) {
 	cookie := &http.Cookie{
-		Name:   "cookie",
+		Name:   chave,
 		Value:  "",
 		Path:   "/",
 		MaxAge: -1,
@@ -324,15 +364,20 @@ func clearCookie(response http.ResponseWriter) {
 	http.SetCookie(response, cookie)
 }
 
-//getUserName recuperar o usuário no cookie
-func getUserName(request *http.Request) (usuario string) {
-	if cookie, err := request.Cookie("cookie"); err == nil {
-		cookieValue := make(map[string]string)
-		if err = cookieHandler.Decode("cookie", cookie.Value, &cookieValue); err == nil {
-			usuario = cookieValue["usuario"]
-		}
+//getDadosCookie recuperar o usuário no cookie
+func getDadosCookie(request *http.Request) (string, string) {
+	usuario := ""
+	senha := ""
+
+	cookieNome, _ := request.Cookie(cookieNomeUsuario)
+	if cookieNome != nil {
+		usuario = cookieNome.Value
 	}
-	return usuario
+	cookieSenha, _ := request.Cookie(cookieSenhaUsuario)
+	if cookieSenha != nil {
+		senha = cookieSenha.Value
+	}
+	return usuario, senha
 }
 
 //avisoUsuarioNaoLogado

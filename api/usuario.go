@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -15,9 +16,11 @@ var api = "go-auth/api/v1"
 
 //Health testar conexão com a API
 func Health() (usuarioHealth models.UsuarioHealth, erro error) {
-	endpoint := variaveis.ApiURL + "/" + api + "/health"
+	var apiRequest ApiRequest
+	apiRequest.EndPoint = variaveis.ApiURL + "/" + api + "/health"
+	apiRequest.Metodo = "GET"
 
-	resposta, err := GetRequest(endpoint)
+	resposta, err := ExecutarRequest(apiRequest)
 	if err != nil {
 		return usuarioHealth, err
 	}
@@ -41,10 +44,14 @@ func Health() (usuarioHealth models.UsuarioHealth, erro error) {
 }
 
 //ListaUsuarios listar mensagens
-func ListaUsuarios() (usuarios models.Usuarios, erro error) {
-	endpoint := variaveis.ApiURL + "/" + api + "/usuarios"
+func ListaUsuarios(nomeUsuario, senhaUsuario string) (usuarios models.Usuarios, erro error) {
+	var apiRequest ApiRequest
+	apiRequest.EndPoint = variaveis.ApiURL + "/" + api + "/usuarios"
+	apiRequest.NomeUsuario = nomeUsuario
+	apiRequest.SenhaUsuario = senhaUsuario
+	apiRequest.Metodo = "GET"
 
-	resposta, err := GetRequest(endpoint)
+	resposta, err := ExecutarRequest(apiRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -68,10 +75,22 @@ func ListaUsuarios() (usuarios models.Usuarios, erro error) {
 }
 
 //AdicionarUsuario adicionar usuário
-func AdicionarUsuario(novoUsuario models.Usuario) (usuarioRetorno models.Usuario, erro error) {
-	endpoint := variaveis.ApiURL + "/" + api + "/usuario/adicionar"
+func AdicionarUsuario(nomeUsuario, senhaUsuario string, novoUsuario models.Usuario) (usuarioRetorno models.Usuario, erro error) {
+	var apiRequest ApiRequest
+	apiRequest.EndPoint = variaveis.ApiURL + "/" + api + "/usuario/adicionar"
+	apiRequest.NomeUsuario = nomeUsuario
+	apiRequest.SenhaUsuario = senhaUsuario
+	apiRequest.Metodo = "POST"
 
-	resposta, err := PostRequest(endpoint, novoUsuario)
+	conteudoEnviar, err := json.Marshal(&novoUsuario)
+	if err != nil {
+		mensagemErro := fmt.Sprintf("%s: %s", "Erro ao gerar o objeto com o JSON lido", err.Error())
+		logger.Erro.Println(mensagemErro)
+		return usuarioRetorno, err
+	}
+	apiRequest.Body = bytes.NewBuffer(conteudoEnviar)
+
+	resposta, err := ExecutarRequest(apiRequest)
 	if err != nil {
 		return usuarioRetorno, err
 	}
@@ -96,9 +115,19 @@ func AdicionarUsuario(novoUsuario models.Usuario) (usuarioRetorno models.Usuario
 
 //Logar logar com o usuário
 func Logar(usuario models.Usuario) (usuarioRetorno models.Usuario, erro error) {
-	endpoint := variaveis.ApiURL + "/" + api + "/usuario/login"
+	var apiRequest ApiRequest
+	apiRequest.EndPoint = variaveis.ApiURL + "/" + api + "/usuario/login"
+	apiRequest.Metodo = "POST"
 
-	resposta, err := PostRequest(endpoint, usuario)
+	conteudoEnviar, err := json.Marshal(&usuario)
+	if err != nil {
+		mensagemErro := fmt.Sprintf("%s: %s", "Erro ao gerar o objeto com o JSON lido", err.Error())
+		logger.Erro.Println(mensagemErro)
+		return usuarioRetorno, err
+	}
+	apiRequest.Body = bytes.NewBuffer(conteudoEnviar)
+
+	resposta, err := ExecutarRequest(apiRequest)
 	if err != nil {
 		return usuarioRetorno, err
 	}
@@ -122,12 +151,18 @@ func Logar(usuario models.Usuario) (usuarioRetorno models.Usuario, erro error) {
 }
 
 //ApagarUsuario apagar usuário
-func ApagarUsuario(id string) error {
-	endpoint := variaveis.ApiURL + "/" + api + "/usuario/apagar/" + id
+func ApagarUsuario(nomeUsuario, senhaUsuario string, id string) error {
+	var apiRequest ApiRequest
+	apiRequest.EndPoint = variaveis.ApiURL + "/" + api + "/usuario/apagar/" + id
+	apiRequest.NomeUsuario = nomeUsuario
+	apiRequest.SenhaUsuario = senhaUsuario
+	apiRequest.Metodo = "DELETE"
 
-	err := DeleteRequest(endpoint)
+	resposta, err := ExecutarRequest(apiRequest)
 	if err != nil {
 		return err
 	}
+	defer resposta.Body.Close()
+
 	return nil
 }
