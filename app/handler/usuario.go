@@ -144,7 +144,7 @@ func Adicionar(w http.ResponseWriter, r *http.Request) {
 			if usuario != "" && senha != "" && email != "" {
 				var usuarioForm models.Usuario
 				usuarioForm.ID = 0
-				usuarioForm.Login = usuario
+				usuarioForm.Nome = usuario
 				usuarioForm.Senha = senha
 				usuarioForm.Email = email
 				usuarioForm.Status = 1
@@ -181,7 +181,7 @@ func Adicionar(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 
-				mensagem := fmt.Sprintf("Usuário %v adicionado com sucesso!", usuarioRetorno.Login)
+				mensagem := fmt.Sprintf("Usuário %v adicionado com sucesso!", usuarioRetorno.Nome)
 				logger.Info.Println(mensagem)
 
 				http.Redirect(w, r, "/", 301)
@@ -217,7 +217,7 @@ func Logar(w http.ResponseWriter, r *http.Request) {
 
 		if usuario != "" && senha != "" {
 			var usuarioForm models.Usuario
-			usuarioForm.Login = usuario
+			usuarioForm.Nome = usuario
 			senhaSum := sha256.Sum256([]byte(senha))
 			senhaHash := fmt.Sprintf("%X", senhaSum)
 			usuarioForm.Senha = string(senhaHash)
@@ -253,10 +253,10 @@ func Logar(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			mensagem := fmt.Sprintf("Usuário %v logado com sucesso!", usuarioRetorno.Login)
+			mensagem := fmt.Sprintf("Usuário %v logado com sucesso!", usuarioRetorno.Nome)
 			logger.Info.Println(mensagem)
 
-			setCookie(usuarioRetorno.Login, usuarioRetorno.Senha, w)
+			setCookie(usuarioRetorno.Nome, usuarioRetorno.Senha, w)
 
 			http.Redirect(w, r, "/", 301)
 		}
